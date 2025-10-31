@@ -1,0 +1,7 @@
+{
+  "name": "item-search",
+  "version": "1.0.0",
+  "main": "api/search.js",
+  "type": "module",
+  "private": true
+}
