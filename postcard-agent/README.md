@@ -14,11 +14,11 @@ Cloud worker for the existing item-search project, running as a Google Apps Scri
 
 ## How it works
 
-Six topic/market groups rotate. At six starts per day, each topic and market group is visited about daily; all 36 topic/market pairings take about six days. Three topics search for unfamiliar designs, and three target specific subjects or publishers. Each request allows at most eight tool calls and 6,000 output tokens. These limits are not a monetary spending cap. Configure API billing limits/alerts in the provider dashboard before enabling recurring use.
+Six topic/market priority groups rotate. Every run searches the worldwide open web, including independent dealers and auction houses beyond those groups. There is no domain allowlist. The groups guide attention rather than limit coverage. At six starts per day, each topic and priority group is visited about daily; all 36 pairings take about six days. Three topics search for unfamiliar designs, and three target specific subjects or publishers. Each request allows at most eight tool calls and 6,000 output tokens. These limits are not a monetary spending cap. Configure API billing limits/alerts in the provider dashboard before enabling recurring use.
 
 Google's background triggers run approximately, not at guaranteed exact times. Search access, marketplace login walls and indexing affect coverage. The agent uses the OpenAI Responses API with live web search, background jobs and a strict result schema. The default model is gpt-5-mini; set user property PC_MODEL to another compatible model if needed. Live compatibility and costs must be tested with an authorized API account before activation. If processing fails repeatedly, use Discard a failed/pending search before starting a replacement.
 
-An empty sheet does not establish no matches. Search log distinguishes pending, failed, timed-out, blocked and completed checks. Retrieved individual listing URLs are required before a candidate is accepted; availability and historical interpretation still involve model judgment. Never automatically purchase.
+An empty sheet does not establish no matches. Search log distinguishes pending, failed, timed-out, blocked and completed checks, and reports sources the model actually checked. Detailed API errors are redacted before logging. The last job ID is retained for the Show last search diagnostic menu action. Retrieved individual listing URLs are required before a candidate is accepted; availability and historical interpretation still involve model judgment. Never automatically purchase.
 
 ## Review and duplicates
 
@@ -36,7 +36,7 @@ This is a research worker, not a complete marketplace crawler. Search evidence i
 
 ## Validation
 
-Run `node --test postcard-agent.test.mjs` in this directory. Tests cover repeated eBay links, review decisions applied after research, condition-specific rejection, variant retention, missing sources, formula-injection handling, malformed output and preservation of review fields. Google runtime and live API integration still require the manual test above.
+Run `node --test postcard-agent.test.mjs` in this directory. Tests cover repeated eBay links, condition-specific rejection, variant retention, missing sources, formula-injection handling, error redaction and preservation of review fields. Google runtime and live API integration still require the manual test above.
 
 References:
 - https://developers.google.com/apps-script/guides/services/authorization

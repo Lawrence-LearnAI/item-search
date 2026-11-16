@@ -45,3 +45,7 @@ test('untrusted cells cannot become spreadsheet formulas',()=>{
 test('review fields remain untouched by duplicate decisions',()=>{
   const old=record();const before=JSON.stringify(old);kind([old]);assert.equal(JSON.stringify(old),before);
 });
+test('diagnostics retain cause while redacting credentials',()=>{
+  const s=ctx.pcSafeError_({code:'server_error',message:'Failure sk-secret123 Bearer token123 user@example.com'});
+  assert.match(s,/server_error/);assert.doesNotMatch(s,/sk-secret123|token123|user@example.com/);
+});
