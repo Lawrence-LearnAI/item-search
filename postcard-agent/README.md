@@ -10,11 +10,12 @@ Cloud worker for the existing item-search project, running as a Google Apps Scri
 4. Choose Connect search API key. Enter the API key directly in the Google dialog, never in chat or a worksheet cell. The key goes to user properties. Sheet editors can edit script code, so only trusted people should have edit access.
 5. Run one search. Google will request permission for this spreadsheet, external requests, and trigger management. Review and authorize it yourself. The script sends catalogue topics and up to 300 prior design identities/decisions to OpenAI. It does not send your free-text review notes or account credentials to the model.
 6. Check pending search after a few minutes, or let the temporary 5-minute poller collect it. The Search log and Rules tab show actual completion or failure.
-7. After a successful manual test, choose Enable searches every 4 hours. Pause searches removes both triggers. A pending API job is retained and can be collected manually.
+7. After a successful manual test, set Rules!B20:B22 and choose Postcard agent > Apply schedule from Rules. Daily at a time uses the chosen time; Times per day supports 1-24 evenly spaced runs anchored to the chosen time. The default is one daily search at 18:00 Israel time. A five-minute cloud timer checks whether a search is due and collects pending results; it does not start a paid search on every timer tick. Later settings changes are applied automatically by this worker, or immediately through the menu. Changes take effect for future slots, with no catch-up search.
+8. Check Rules!B18 (Pause agent) to stop new searches. Uncheck it to resume. A search already in progress can finish. The Pause searches menu sets the same checkbox. Do not delete rows or triggers to pause.
 
 ## How it works
 
-Six topic/market priority groups rotate. Every run searches the worldwide open web, including independent dealers and auction houses beyond those groups. There is no domain allowlist. The groups guide attention rather than limit coverage. At six starts per day, each topic and priority group is visited about daily; all 36 pairings take about six days. Three topics search for unfamiliar designs, and three target specific subjects or publishers. Each request allows at most eight tool calls and 6,000 output tokens. These limits are not a monetary spending cap. Configure API billing limits/alerts in the provider dashboard before enabling recurring use.
+Six topic/market priority groups rotate across successive searches. Every run searches the worldwide open web, including independent dealers and auction houses beyond those groups. There is no domain allowlist. The groups guide attention rather than limit coverage. Three topics search for unfamiliar designs, and three target specific subjects or publishers. Each request allows at most eight tool calls and 6,000 output tokens. A daily safeguard allows the selected daily count plus six manual/troubleshooting starts. These limits are not a monetary spending cap. Configure API billing limits/alerts in the provider dashboard before enabling recurring use.
 
 Google's background triggers run approximately, not at guaranteed exact times. Search access, marketplace login walls and indexing affect coverage. The agent uses the OpenAI Responses API with live web search, background jobs and a strict result schema. The default model is gpt-5-mini; set user property PC_MODEL to another compatible model if needed. Live compatibility and costs must be tested with an authorized API account before activation. If processing fails repeatedly, use Discard a failed/pending search before starting a replacement.
 
@@ -36,7 +37,7 @@ This is a research worker, not a complete marketplace crawler. Search evidence i
 
 ## Validation
 
-Run `node --test postcard-agent.test.mjs` in this directory. Tests cover repeated eBay links, condition-specific rejection, variant retention, missing sources, formula-injection handling, error redaction and preservation of review fields. Google runtime and live API integration still require the manual test above.
+Run `node --test postcard-agent.test.mjs` in this directory. Tests cover repeated eBay links, condition-specific rejection, variant retention, missing sources, formula-injection handling, error redaction, preservation of review fields, pause gating, and daily/multiple scheduling boundaries. Google runtime and live API integration still require the manual test above.
 
 References:
 - https://developers.google.com/apps-script/guides/services/authorization

@@ -49,3 +49,26 @@ test('diagnostics retain cause while redacting credentials',()=>{
   const s=ctx.pcSafeError_({code:'server_error',message:'Failure sk-secret123 Bearer token123 user@example.com'});
   assert.match(s,/server_error/);assert.doesNotMatch(s,/sk-secret123|token123|user@example.com/);
 });
+test('pause prevents any API request or new job',()=>{
+  const paused=vm.createContext({});
+  vm.runInContext(fs.readFileSync(new URL('./PostcardAgent.gs',import.meta.url),'utf8'),paused);
+  paused.pcPaused_=()=>true;let logged=false;paused.pcLog_=()=>{logged=true;};
+  paused.pcApi_=()=>assert.fail('Paused agent must not call API');
+  paused.pcStart();assert.equal(logged,true);
+});
+test('daily schedule does not run before the chosen time',()=>{
+  ctx.Utilities={formatDate:(date,tz,fmt)=>fmt==='yyyy-MM-dd'?'2026-11-16':date};
+  assert.equal(ctx.pcDue_({count:1,minute:1080},'17:59'),null);
+  assert.equal(ctx.pcDue_({count:1,minute:1080},'18:00'),'2026-11-16|1080');
+  assert.equal(ctx.pcDue_({count:1,minute:1080},'18:04'),'2026-11-16|1080');
+});
+test('twice daily has two distinct slots twelve hours apart',()=>{
+  assert.equal(ctx.pcDue_({count:2,minute:1080},'05:59'),null);
+  assert.equal(ctx.pcDue_({count:2,minute:1080},'06:00'),'2026-11-16|360');
+  assert.equal(ctx.pcDue_({count:2,minute:1080},'18:00'),'2026-11-16|1080');
+});
+test('five runs per day have five distinct slots',()=>{
+  const config={count:5,minute:0};
+  const ids=['00:00','04:48','09:36','14:24','19:12'].map(t=>ctx.pcDue_(config,t));
+  assert.equal(new Set(ids).size,5);
+});

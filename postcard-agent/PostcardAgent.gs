@@ -25,7 +25,7 @@ function onOpen() {
     .addItem('Check pending search', 'pcPoll')
     .addItem('Show last search diagnostic', 'pcDiagnose')
     .addItem('Discard a failed/pending search', 'pcDiscard')
-    .addItem('Enable searches every 4 hours', 'pcEnable')
+    .addItem('Apply schedule from Rules', 'pcEnable')
     .addItem('Pause searches', 'pcPause').addToUi();
 }
 
@@ -42,17 +42,73 @@ function pcConnect() {
 function pcEnable() {
   if (!pcProps_().getProperty('PC_OPENAI_KEY')) throw new Error('Connect the search API key first.');
   if (!pcProps_().getProperty('PC_TEST_SUCCEEDED')) throw new Error('Run one search and check it completes successfully before enabling.');
-  pcPause();
-  ScriptApp.newTrigger('pcStart').timeBased().everyHours(4).create();
-  // Poll background work briefly instead of blocking a script for several minutes.
-  ScriptApp.newTrigger('pcPoll').timeBased().everyMinutes(5).create();
-  pcStatus_('Enabled: searches approximately every 4 hours. See Search log for actual results.');
+  const config=pcSchedule_();
+  pcRemoveTriggers_();
+  ScriptApp.newTrigger('pcTick').timeBased().everyMinutes(5).create();
+  pcProps_().setProperty('PC_SCHEDULE',JSON.stringify(config));
+  pcProps_().setProperty('PC_LAST_SLOT',pcDue_(config,new Date()) || '');
+  pcStatus_((pcPaused_()?'Paused. ':'Enabled. ')+pcScheduleText_(config));
 }
 
-function pcPause() {
-  ScriptApp.getProjectTriggers().filter(t => ['pcStart','pcPoll'].indexOf(t.getHandlerFunction()) >= 0)
+function pcRemoveTriggers_() {
+  ScriptApp.getProjectTriggers().filter(t => ['pcStart','pcPoll','pcTick'].indexOf(t.getHandlerFunction()) >= 0)
     .forEach(t => ScriptApp.deleteTrigger(t));
-  pcStatus_('Paused. Existing discoveries and pending job are retained.');
+}
+function pcPaused_() {
+  const rules=pcBook_().getSheetByName('Rules');
+  return rules ? pcYes_(rules.getRange('B18').getValue()) : false;
+}
+function pcPause() {
+  const rules=pcBook_().getSheetByName('Rules');
+  if(rules) rules.getRange('B18').setValue(true);
+  pcStatus_('Paused using Rules!B18. Uncheck Pause agent to resume your schedule. A search already in progress may finish.');
+}
+function onEdit(e) {
+  if(!e || !e.range || e.range.getSheet().getName()!=='Rules' || e.range.getColumn()!==2) return;
+  if(e.range.getRow()===18) pcStatus_(pcYes_(e.range.getValue()) ? 'Paused using Rules!B18. No new searches will start. A search already in progress may finish.' : 'Pause cleared. The agent will resume your schedule.');
+  if(e.range.getRow()>=20 && e.range.getRow()<=22) pcStatus_('Schedule edited. Automatic worker will apply it within about five minutes, or choose Postcard agent > Apply schedule from Rules.');
+}
+
+function pcSchedule_() {
+  const rules=pcBook_().getSheetByName('Rules');
+  const values=rules.getRange('B20:B22').getValues().map(r=>r[0]);
+  const mode=String(values[0]);const count=mode==='Daily at a time'?1:Number(values[1]);
+  if(['Daily at a time','Times per day'].indexOf(mode)<0 || !Number.isInteger(count) || count<1 || count>24) throw new Error('Rules: choose a schedule mode and a whole number from 1 to 24 for times per day.');
+  let minute;
+  if(values[2] instanceof Date) {const t=rules.getRange('B22').getDisplayValue().split(':');minute=Number(t[0])*60+Number(t[1]);}
+  else if(typeof values[2]==='number') minute=Math.round((values[2]%1)*1440)%1440;
+  else {const m=String(values[2]).match(/^(\d{1,2}):(\d{2})$/);if(m && Number(m[1])<24 && Number(m[2])<60)minute=Number(m[1])*60+Number(m[2]);}
+  if(minute===undefined || minute<0 || minute>=1440)throw new Error('Rules!B22 must contain a valid time, for example 18:00.');
+  return {mode:mode,count:count,minute:minute};
+}
+function pcDue_(config,now) {
+  const day=Utilities.formatDate(now,'Asia/Jerusalem','yyyy-MM-dd');
+  const parts=Utilities.formatDate(now,'Asia/Jerusalem','HH:mm').split(':');const current=Number(parts[0])*60+Number(parts[1]);
+  const slots=Array.from({length:config.count},(_,i)=>(config.minute+Math.floor(i*1440/config.count))%1440).sort((a,b)=>a-b);
+  const due=slots.filter(m=>m<=current);return due.length?day+'|'+due[due.length-1]:null;
+}
+function pcScheduleText_(config) {
+  const time=String(Math.floor(config.minute/60)).padStart(2,'0')+':'+String(config.minute%60).padStart(2,'0');
+  return (config.count===1?'Daily at '+time:config.count+' searches per day, evenly spaced from '+time)+', Israel time. Starts are approximate; settings are checked every five minutes.';
+}
+function pcTick() {
+  pcPoll();
+  const lock=LockService.getScriptLock();if(!lock.tryLock(1000))return;
+  let start=false;
+  try {
+    const props=pcProps_();const config=pcSchedule_();const signature=JSON.stringify(config);const due=pcDue_(config,new Date());
+    if(props.getProperty('PC_SCHEDULE')!==signature) {
+      props.setProperty('PC_SCHEDULE',signature);props.setProperty('PC_LAST_SLOT',due || '');
+      pcStatus_((pcPaused_()?'Paused. ':'Enabled. ')+pcScheduleText_(config));return;
+    }
+    if(pcPaused_()) {props.setProperty('PC_LAST_SLOT',due || '');return;}
+    if(due && props.getProperty('PC_LAST_SLOT')!==due) {
+      props.setProperty('PC_LAST_SLOT',due);
+      start=!props.getProperty('PC_PENDING');
+    }
+  } catch(e) {pcStatus_('Schedule needs correction: '+e.message);pcLog_('Schedule error',e.message,0);throw e;}
+  finally {lock.releaseLock();}
+  if(start)pcStart();
 }
 
 function pcProps_() { return PropertiesService.getUserProperties(); }
@@ -123,6 +179,7 @@ function pcRows_() {
 }
 
 function pcStart() {
+  if(pcPaused_()) {pcLog_('Paused','Rules!B18 is checked. No new search or API request started.',0);return;}
   const lock=LockService.getScriptLock(); if (!lock.tryLock(1000)) return;
   try {
     const props=pcProps_();
@@ -130,7 +187,8 @@ function pcStart() {
     const day=Utilities.formatDate(new Date(),'Asia/Jerusalem','yyyy-MM-dd');
     const tally=JSON.parse(props.getProperty('PC_DAILY') || '{}');
     const n=tally.day===day ? Number(tally.n || 0) : 0;
-    if (n>=6) {pcLog_('Daily limit','Six searches already started today. No API request made.',0);return;}
+    const dailyLimit=pcSchedule_().count+6;
+    if (n>=dailyLimit) {pcLog_('Daily limit','Scheduled allowance plus six manual tests already used today. No API request made.',0);return;}
     const slot=Number(props.getProperty('PC_SLOT') || 0);
     const rows=pcRows_().values.slice(1).filter(r => r[3]);
     // Send only catalogue identities and suppression decisions, never personal notes.
@@ -154,7 +212,7 @@ function pcStart() {
     props.setProperty('PC_PENDING',JSON.stringify({id:response.id,slot:slot,started:Date.now()}));
     props.setProperty('PC_SLOT',String(slot+1));
     // Create the poller for a manual first search as well. No new search is scheduled by this.
-    if (!ScriptApp.getProjectTriggers().some(t=>t.getHandlerFunction()==='pcPoll'))
+    if (!ScriptApp.getProjectTriggers().some(t=>['pcPoll','pcTick'].indexOf(t.getHandlerFunction())>=0))
       ScriptApp.newTrigger('pcPoll').timeBased().everyMinutes(5).create();
     pcLog_('Started','Worldwide open-web search. Topic '+(slot%6+1)+'. Priority group, not a restriction: '+PC_MARKETS[(slot+Math.floor(slot/6))%PC_MARKETS.length].join(', '),0);
     pcStatus_('Search pending. Started '+new Date().toISOString()+'.');
@@ -206,8 +264,8 @@ function pcPoll() {
     const details='New: '+counts.added+', already seen: '+counts.seen+', suppressed: '+counts.suppressed+', unverified: '+counts.unverified+'. '+
       'Actually checked: '+((result.checkedMarkets || []).join(', ') || 'none reported')+'. Unchecked/blocked: '+(result.blockedMarkets.join(', ') || 'none reported')+'. '+String(result.summary || '').slice(0,1500);
     pcLog_('Completed',details,counts.added);
-    const enabled=ScriptApp.getProjectTriggers().some(t=>t.getHandlerFunction()==='pcStart');
-    pcStatus_((enabled?'Scheduled. ':'Manual test complete. No recurring search enabled. ')+'Last completed '+new Date().toISOString()+'.');
+    const enabled=ScriptApp.getProjectTriggers().some(t=>['pcStart','pcTick'].indexOf(t.getHandlerFunction())>=0);
+    pcStatus_((pcPaused_()?'Paused. In-progress search finished. ':enabled?pcScheduleText_(pcSchedule_())+' ':'Manual test complete. No recurring search enabled. ')+'Last completed '+new Date().toISOString()+'.');
     if(!enabled) ScriptApp.getProjectTriggers().filter(t=>t.getHandlerFunction()==='pcPoll').forEach(t=>ScriptApp.deleteTrigger(t));
   } catch(e) {pcLog_('Failed',e.message,0);pcStatus_('Search processing failed. See Search log.');throw e;}
   finally {lock.releaseLock();}
