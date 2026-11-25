@@ -112,6 +112,11 @@ function pcTick() {
 }
 
 function pcProps_() { return PropertiesService.getUserProperties(); }
+function pcModel_() {
+  const configured=String(pcProps_().getProperty('PC_MODEL') || '').trim();
+  // Retired GPT-5 mini aliases must not override the replacement default.
+  return !configured || /^gpt-5-mini(?:-2025-08-07)?$/.test(configured) ? 'gpt-6.1-terra' : configured;
+}
 function pcSafeError_(error) {
   const e=error || {};
   return [e.code,e.param,e.message].filter(Boolean).join(': ')
@@ -201,7 +206,7 @@ function pcStart() {
     // Consume the allowance before the request: an ambiguous network failure must not cause unlimited retries.
     props.setProperty('PC_DAILY',JSON.stringify({day:day,n:n+1}));
     const response=pcApi_('post','',{
-      model:props.getProperty('PC_MODEL') || 'gpt-5-mini',background:true,store:true,
+      model:pcModel_(),background:true,store:true,
       max_output_tokens:6000,max_tool_calls:8,
       tools:[{type:'web_search',external_web_access:true}],
       include:['web_search_call.action.sources'],
@@ -214,7 +219,7 @@ function pcStart() {
     // Create the poller for a manual first search as well. No new search is scheduled by this.
     if (!ScriptApp.getProjectTriggers().some(t=>['pcPoll','pcTick'].indexOf(t.getHandlerFunction())>=0))
       ScriptApp.newTrigger('pcPoll').timeBased().everyMinutes(5).create();
-    pcLog_('Started','Worldwide open-web search. Topic '+(slot%6+1)+'. Priority group, not a restriction: '+PC_MARKETS[(slot+Math.floor(slot/6))%PC_MARKETS.length].join(', '),0);
+    pcLog_('Started','Model: '+(response.model || pcModel_())+'. Worldwide open-web search. Topic '+(slot%6+1)+'. Priority group, not a restriction: '+PC_MARKETS[(slot+Math.floor(slot/6))%PC_MARKETS.length].join(', '),0);
     pcStatus_('Search pending. Started '+new Date().toISOString()+'.');
   } catch(e) {pcLog_('Failed',e.message,0);pcStatus_('Search failed. See Search log.');throw e;}
   finally {lock.releaseLock();}
@@ -261,7 +266,7 @@ function pcPoll() {
       rows[rowIndex]=row;counts.added++;
     });
     props.deleteProperty('PC_PENDING');props.setProperty('PC_TEST_SUCCEEDED','true');
-    const details='New: '+counts.added+', already seen: '+counts.seen+', suppressed: '+counts.suppressed+', unverified: '+counts.unverified+'. '+
+    const details='Model: '+(response.model || 'unknown')+'. New: '+counts.added+', already seen: '+counts.seen+', suppressed: '+counts.suppressed+', unverified: '+counts.unverified+'. '+
       'Actually checked: '+((result.checkedMarkets || []).join(', ') || 'none reported')+'. Unchecked/blocked: '+(result.blockedMarkets.join(', ') || 'none reported')+'. '+String(result.summary || '').slice(0,1500);
     pcLog_('Completed',details,counts.added);
     const enabled=ScriptApp.getProjectTriggers().some(t=>['pcStart','pcTick'].indexOf(t.getHandlerFunction())>=0);
